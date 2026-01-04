@@ -32,6 +32,11 @@ const DEFAULT_MAX_CONTEXT_MESSAGES = 20;
 const DEFAULT_MAX_ESTIMATED_TOKENS = 100000;
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 
+// Network configuration
+const REQUEST_TIMEOUT_MS = 60000; // 60 seconds
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000; // 1 second base delay
+
 // OpenAI-compatible message format
 interface OpenAIMessage {
   role: 'user' | 'assistant' | 'system';
@@ -99,13 +104,11 @@ export class OpenAICompatibleAgent {
     try {
       const config = this.getConfig();
 
-      if (!config.apiKey) {
-        throw new Error('OpenAI Compatible API key not configured. Set CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY in settings.');
-      }
-
       if (!config.baseUrl) {
         throw new Error('OpenAI Compatible API URL not configured. Set CLAUDE_MEM_OPENAI_COMPATIBLE_URL in settings.');
       }
+
+      // Note: API key is optional for local servers (e.g., Ollama)
 
       const mode = ModeManager.getInstance().getActiveMode();
 
@@ -345,6 +348,94 @@ export class OpenAICompatibleAgent {
   }
 
   /**
+   * Fetch with timeout support
+   */
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs: number = REQUEST_TIMEOUT_MS
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      return response;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
+   * Fetch with retry and exponential backoff
+   */
+  private async fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    maxRetries: number = MAX_RETRIES
+  ): Promise<Response> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.fetchWithTimeout(url, options);
+
+        // Don't retry on client errors (4xx) except 429 (rate limit)
+        if (!response.ok && response.status !== 429 && response.status >= 400 && response.status < 500) {
+          return response; // Return to let caller handle the error
+        }
+
+        // Retry on server errors (5xx) and rate limits (429)
+        if (!response.ok && (response.status >= 500 || response.status === 429)) {
+          if (attempt < maxRetries) {
+            const delay = RETRY_DELAY_MS * Math.pow(2, attempt); // Exponential backoff
+            logger.warn('SDK', `OpenAI Compatible API error ${response.status}, retrying in ${delay}ms`, {
+              attempt: attempt + 1,
+              maxRetries,
+              status: response.status
+            });
+            await this.sleep(delay);
+            continue;
+          }
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Retry on network errors
+        if (attempt < maxRetries) {
+          const delay = RETRY_DELAY_MS * Math.pow(2, attempt);
+          logger.warn('SDK', `OpenAI Compatible API network error, retrying in ${delay}ms`, {
+            attempt: attempt + 1,
+            maxRetries,
+            error: lastError.message
+          });
+          await this.sleep(delay);
+          continue;
+        }
+      }
+    }
+
+    throw lastError || new Error('Request failed after retries');
+  }
+
+  /**
+   * Sleep for a given duration
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
    * Query the OpenAI Compatible API
    */
   private async queryAPI(
@@ -365,12 +456,18 @@ export class OpenAICompatibleAgent {
       endpoint = endpoint.replace(/\/$/, '') + '/chat/completions';
     }
 
-    const response = await fetch(endpoint, {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    // Only add Authorization header if API key is provided
+    if (config.apiKey) {
+      headers['Authorization'] = `Bearer ${config.apiKey}`;
+    }
+
+    const response = await this.fetchWithRetry(endpoint, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         model: config.model,
         messages,
@@ -435,13 +532,13 @@ export class OpenAICompatibleAgent {
 }
 
 /**
- * Check if OpenAI Compatible is available (has URL and API key configured)
+ * Check if OpenAI Compatible is available (has URL configured)
+ * Note: API key is optional for local servers like Ollama
  */
 export function isOpenAICompatibleAvailable(): boolean {
   const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
   const hasUrl = !!settings.CLAUDE_MEM_OPENAI_COMPATIBLE_URL;
-  const hasKey = !!(settings.CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY || process.env.OPENAI_COMPATIBLE_API_KEY);
-  return hasUrl && hasKey;
+  return hasUrl;
 }
 
 /**
