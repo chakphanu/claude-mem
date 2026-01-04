@@ -14,6 +14,7 @@ import { DatabaseManager } from '../../DatabaseManager.js';
 import { SDKAgent } from '../../SDKAgent.js';
 import { GeminiAgent, isGeminiSelected, isGeminiAvailable } from '../../GeminiAgent.js';
 import { OpenRouterAgent, isOpenRouterSelected, isOpenRouterAvailable } from '../../OpenRouterAgent.js';
+import { OpenAICompatibleAgent, isOpenAICompatibleSelected, isOpenAICompatibleAvailable } from '../../OpenAICompatibleAgent.js';
 import type { WorkerService } from '../../../worker-service.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SessionEventBroadcaster } from '../../events/SessionEventBroadcaster.js';
@@ -31,6 +32,7 @@ export class SessionRoutes extends BaseRouteHandler {
     private sdkAgent: SDKAgent,
     private geminiAgent: GeminiAgent,
     private openRouterAgent: OpenRouterAgent,
+    private openAICompatibleAgent: OpenAICompatibleAgent,
     private eventBroadcaster: SessionEventBroadcaster,
     private workerService: WorkerService
   ) {
@@ -48,7 +50,15 @@ export class SessionRoutes extends BaseRouteHandler {
    * Note: Session linking via contentSessionId allows provider switching mid-session.
    * The conversationHistory on ActiveSession maintains context across providers.
    */
-  private getActiveAgent(): SDKAgent | GeminiAgent | OpenRouterAgent {
+  private getActiveAgent(): SDKAgent | GeminiAgent | OpenRouterAgent | OpenAICompatibleAgent {
+    if (isOpenAICompatibleSelected()) {
+      if (isOpenAICompatibleAvailable()) {
+        logger.debug('SESSION', 'Using OpenAI Compatible agent');
+        return this.openAICompatibleAgent;
+      } else {
+        throw new Error('OpenAI Compatible provider selected but URL or API key not configured. Set CLAUDE_MEM_OPENAI_COMPATIBLE_URL and CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY in settings.');
+      }
+    }
     if (isOpenRouterSelected()) {
       if (isOpenRouterAvailable()) {
         logger.debug('SESSION', 'Using OpenRouter agent');
@@ -71,7 +81,10 @@ export class SessionRoutes extends BaseRouteHandler {
   /**
    * Get the currently selected provider name
    */
-  private getSelectedProvider(): 'claude' | 'gemini' | 'openrouter' {
+  private getSelectedProvider(): 'claude' | 'gemini' | 'openrouter' | 'openai-compatible' {
+    if (isOpenAICompatibleSelected() && isOpenAICompatibleAvailable()) {
+      return 'openai-compatible';
+    }
     if (isOpenRouterSelected() && isOpenRouterAvailable()) {
       return 'openrouter';
     }
@@ -117,13 +130,18 @@ export class SessionRoutes extends BaseRouteHandler {
    */
   private startGeneratorWithProvider(
     session: ReturnType<typeof this.sessionManager.getSession>,
-    provider: 'claude' | 'gemini' | 'openrouter',
+    provider: 'claude' | 'gemini' | 'openrouter' | 'openai-compatible',
     source: string
   ): void {
     if (!session) return;
 
-    const agent = provider === 'openrouter' ? this.openRouterAgent : (provider === 'gemini' ? this.geminiAgent : this.sdkAgent);
-    const agentName = provider === 'openrouter' ? 'OpenRouter' : (provider === 'gemini' ? 'Gemini' : 'Claude SDK');
+    const agentMap = {
+      'openai-compatible': { agent: this.openAICompatibleAgent, name: 'OpenAI Compatible' },
+      'openrouter': { agent: this.openRouterAgent, name: 'OpenRouter' },
+      'gemini': { agent: this.geminiAgent, name: 'Gemini' },
+      'claude': { agent: this.sdkAgent, name: 'Claude SDK' }
+    };
+    const { agent, name: agentName } = agentMap[provider] || agentMap.claude;
 
     logger.info('SESSION', `Generator auto-starting (${source}) using ${agentName}`, {
       sessionId: session.sessionDbId,

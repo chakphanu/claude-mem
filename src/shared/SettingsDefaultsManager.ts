@@ -18,7 +18,7 @@ export interface SettingsDefaults {
   CLAUDE_MEM_WORKER_HOST: string;
   CLAUDE_MEM_SKIP_TOOLS: string;
   // AI Provider Configuration
-  CLAUDE_MEM_PROVIDER: string;  // 'claude' | 'gemini' | 'openrouter'
+  CLAUDE_MEM_PROVIDER: string;  // 'claude' | 'gemini' | 'openrouter' | 'openai-compatible'
   CLAUDE_MEM_GEMINI_API_KEY: string;
   CLAUDE_MEM_GEMINI_MODEL: string;  // 'gemini-2.5-flash-lite' | 'gemini-2.5-flash' | 'gemini-3-flash'
   CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED: string;  // 'true' | 'false' - enable rate limiting for free tier
@@ -28,6 +28,12 @@ export interface SettingsDefaults {
   CLAUDE_MEM_OPENROUTER_APP_NAME: string;
   CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES: string;
   CLAUDE_MEM_OPENROUTER_MAX_TOKENS: string;
+  // OpenAI Compatible Configuration
+  CLAUDE_MEM_OPENAI_COMPATIBLE_URL: string;
+  CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY: string;
+  CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL: string;
+  CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES: string;
+  CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS: string;
   // System Configuration
   CLAUDE_MEM_DATA_DIR: string;
   CLAUDE_MEM_LOG_LEVEL: string;
@@ -72,6 +78,12 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_OPENROUTER_APP_NAME: 'claude-mem',  // App name for OpenRouter analytics
     CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES: '20',  // Max messages in context window
     CLAUDE_MEM_OPENROUTER_MAX_TOKENS: '100000',  // Max estimated tokens (~100k safety limit)
+    // OpenAI Compatible Configuration
+    CLAUDE_MEM_OPENAI_COMPATIBLE_URL: '',  // Base URL for OpenAI-compatible API (e.g., http://localhost:11434/v1)
+    CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY: '',  // API key (some local servers don't require this)
+    CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL: 'gpt-3.5-turbo',  // Model name
+    CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES: '20',  // Max messages in context
+    CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS: '100000',  // Max estimated tokens
     // System Configuration
     CLAUDE_MEM_DATA_DIR: join(homedir(), '.claude-mem'),
     CLAUDE_MEM_LOG_LEVEL: 'INFO',

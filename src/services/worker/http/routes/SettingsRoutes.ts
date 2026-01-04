@@ -17,18 +17,31 @@ import { ModeManager } from '../../domain/ModeManager.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SettingsDefaultsManager } from '../../../../shared/SettingsDefaultsManager.js';
 import { clearPortCache } from '../../../../shared/worker-utils.js';
+import { OpenAICompatibleAgent } from '../../OpenAICompatibleAgent.js';
 
 export class SettingsRoutes extends BaseRouteHandler {
+  private openAICompatibleAgent: OpenAICompatibleAgent | null = null;
+
   constructor(
     private settingsManager: SettingsManager
   ) {
     super();
   }
 
+  /**
+   * Set the OpenAI Compatible agent for model listing
+   */
+  setOpenAICompatibleAgent(agent: OpenAICompatibleAgent): void {
+    this.openAICompatibleAgent = agent;
+  }
+
   setupRoutes(app: express.Application): void {
     // Settings endpoints
     app.get('/api/settings', this.handleGetSettings.bind(this));
     app.post('/api/settings', this.handleUpdateSettings.bind(this));
+
+    // OpenAI Compatible models listing
+    app.get('/api/openai-compatible/models', this.handleListOpenAIModels.bind(this));
 
     // MCP toggle endpoints
     app.get('/api/mcp/status', this.handleGetMcpStatus.bind(this));
@@ -101,6 +114,12 @@ export class SettingsRoutes extends BaseRouteHandler {
       'CLAUDE_MEM_OPENROUTER_APP_NAME',
       'CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES',
       'CLAUDE_MEM_OPENROUTER_MAX_TOKENS',
+      // OpenAI Compatible Configuration
+      'CLAUDE_MEM_OPENAI_COMPATIBLE_URL',
+      'CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY',
+      'CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL',
+      'CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES',
+      'CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS',
       // System Configuration
       'CLAUDE_MEM_DATA_DIR',
       'CLAUDE_MEM_LOG_LEVEL',
@@ -233,9 +252,9 @@ export class SettingsRoutes extends BaseRouteHandler {
   private validateSettings(settings: any): { valid: boolean; error?: string } {
     // Validate CLAUDE_MEM_PROVIDER
     if (settings.CLAUDE_MEM_PROVIDER) {
-    const validProviders = ['claude', 'gemini', 'openrouter'];
+    const validProviders = ['claude', 'gemini', 'openrouter', 'openai-compatible'];
     if (!validProviders.includes(settings.CLAUDE_MEM_PROVIDER)) {
-      return { valid: false, error: 'CLAUDE_MEM_PROVIDER must be "claude", "gemini", or "openrouter"' };
+      return { valid: false, error: 'CLAUDE_MEM_PROVIDER must be "claude", "gemini", "openrouter", or "openai-compatible"' };
       }
     }
 
@@ -355,6 +374,32 @@ export class SettingsRoutes extends BaseRouteHandler {
       }
     }
 
+    // Validate CLAUDE_MEM_OPENAI_COMPATIBLE_URL if provided
+    if (settings.CLAUDE_MEM_OPENAI_COMPATIBLE_URL) {
+      try {
+        new URL(settings.CLAUDE_MEM_OPENAI_COMPATIBLE_URL);
+      } catch (error) {
+        logger.debug('SETTINGS', 'Invalid URL format', { url: settings.CLAUDE_MEM_OPENAI_COMPATIBLE_URL, error: error instanceof Error ? error.message : String(error) });
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPATIBLE_URL must be a valid URL' };
+      }
+    }
+
+    // Validate CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES
+    if (settings.CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES) {
+      const count = parseInt(settings.CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES, 10);
+      if (isNaN(count) || count < 1 || count > 100) {
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_CONTEXT_MESSAGES must be between 1 and 100' };
+      }
+    }
+
+    // Validate CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS
+    if (settings.CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS) {
+      const tokens = parseInt(settings.CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS, 10);
+      if (isNaN(tokens) || tokens < 1000 || tokens > 1000000) {
+        return { valid: false, error: 'CLAUDE_MEM_OPENAI_COMPATIBLE_MAX_TOKENS must be between 1000 and 1000000' };
+      }
+    }
+
     // Skip observation types validation - any type string is valid since modes define their own types
     // The database accepts any TEXT value, and mode-specific validation happens at parse time
 
@@ -363,6 +408,59 @@ export class SettingsRoutes extends BaseRouteHandler {
 
     return { valid: true };
   }
+
+  /**
+   * GET /api/openai-compatible/models - List available models from OpenAI Compatible API
+   * Query params: url (required), apiKey (optional)
+   */
+  private handleListOpenAIModels = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const { url, apiKey } = req.query;
+
+    if (!url || typeof url !== 'string') {
+      res.status(400).json({ success: false, error: 'URL is required. Please enter the API URL first.' });
+      return;
+    }
+
+    try {
+      // Construct models endpoint from base URL
+      let modelsUrl = url.replace(/\/chat\/completions\/?$/, '').replace(/\/$/, '');
+      if (!modelsUrl.endsWith('/models')) {
+        modelsUrl = modelsUrl + '/models';
+      }
+
+      logger.debug('SETTINGS', 'Fetching models from OpenAI Compatible API', { url: modelsUrl });
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (apiKey && typeof apiKey === 'string') {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      const response = await fetch(modelsUrl, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json() as { data?: Array<{ id: string; owned_by?: string }>; error?: { message?: string } };
+
+      if (data.error) {
+        throw new Error(`API error: ${data.error.message}`);
+      }
+
+      res.json({ success: true, models: data.data || [] });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn('SETTINGS', 'Failed to list OpenAI Compatible models', { error: errorMessage });
+      res.status(400).json({ success: false, error: errorMessage });
+    }
+  });
 
   /**
    * Check if MCP search server is enabled
