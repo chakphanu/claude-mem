@@ -176,6 +176,133 @@ function ToggleSwitch({
   );
 }
 
+// OpenAI Compatible settings component with model listing
+function OpenAICompatibleSettings({
+  formState,
+  updateSetting
+}: {
+  formState: Settings;
+  updateSetting: (key: keyof Settings, value: string) => void;
+}) {
+  const [models, setModels] = useState<Array<{ id: string; owned_by?: string }>>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  const fetchModels = useCallback(async () => {
+    const url = formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL;
+    const apiKey = formState.CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY;
+
+    if (!url) {
+      setModelsError('Please enter the API URL first');
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setModelsError(null);
+    try {
+      const params = new URLSearchParams({ url });
+      if (apiKey) {
+        params.append('apiKey', apiKey);
+      }
+      const response = await fetch(`/api/openai-compatible/models?${params}`);
+      const data = await response.json();
+      if (data.success && data.models) {
+        setModels(data.models);
+      } else {
+        setModelsError(data.error || 'Failed to fetch models');
+      }
+    } catch (error) {
+      setModelsError(error instanceof Error ? error.message : 'Failed to fetch models');
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL, formState.CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY]);
+
+  return (
+    <>
+      <FormField
+        label="API URL"
+        tooltip="Base URL for OpenAI-compatible API (e.g., http://localhost:11434/v1 for Ollama)"
+      >
+        <input
+          type="text"
+          value={formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL || ''}
+          onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPATIBLE_URL', e.target.value)}
+          placeholder="http://localhost:11434/v1"
+        />
+      </FormField>
+      <FormField
+        label="API Key"
+        tooltip="API key (optional for local servers like Ollama)"
+      >
+        <input
+          type="password"
+          value={formState.CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY || ''}
+          onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY', e.target.value)}
+          placeholder="Enter API key (optional)..."
+        />
+      </FormField>
+      <FormField
+        label="Model"
+        tooltip="Model name from your API"
+      >
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {models.length > 0 ? (
+            <select
+              value={formState.CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL || ''}
+              onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL', e.target.value)}
+              style={{ flex: 1 }}
+            >
+              <option value="">-- Select a model --</option>
+              {models.map(model => (
+                <option key={model.id} value={model.id}>
+                  {model.owned_by ? `${model.id} (${model.owned_by})` : model.id}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={formState.CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL || ''}
+              onChange={(e) => updateSetting('CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL', e.target.value)}
+              placeholder="e.g., llama3.2, gpt-4o"
+              style={{ flex: 1 }}
+            />
+          )}
+          <button
+            type="button"
+            onClick={fetchModels}
+            disabled={isLoadingModels || !formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL}
+            title={!formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL ? 'Enter API URL first' : 'Fetch available models'}
+            style={{
+              padding: '8px 12px',
+              border: '1px solid var(--border-color, #444)',
+              borderRadius: '4px',
+              background: 'var(--button-bg, #333)',
+              color: 'var(--text-color, #fff)',
+              cursor: isLoadingModels || !formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL ? 'not-allowed' : 'pointer',
+              opacity: isLoadingModels || !formState.CLAUDE_MEM_OPENAI_COMPATIBLE_URL ? 0.5 : 1,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {isLoadingModels ? '...' : 'Fetch'}
+          </button>
+        </div>
+        {modelsError && (
+          <span style={{ color: '#ff6b6b', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+            {modelsError}
+          </span>
+        )}
+        {models.length > 0 && !modelsError && (
+          <span style={{ color: '#4ade80', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+            Found {models.length} models - select from dropdown
+          </span>
+        )}
+      </FormField>
+    </>
+  );
+}
+
 export function ContextSettingsModal({
   isOpen,
   onClose,
@@ -414,7 +541,7 @@ export function ContextSettingsModal({
             >
               <FormField
                 label="AI Provider"
-                tooltip="Choose between Claude (via Agent SDK) or Gemini (via REST API)"
+                tooltip="Choose between Claude (via Agent SDK), Gemini, OpenRouter, or any OpenAI-compatible API"
               >
                 <select
                   value={formState.CLAUDE_MEM_PROVIDER || 'claude'}
@@ -423,6 +550,7 @@ export function ContextSettingsModal({
                   <option value="claude">Claude (uses your Claude account)</option>
                   <option value="gemini">Gemini (uses API key)</option>
                   <option value="openrouter">OpenRouter (multi-model)</option>
+                  <option value="openai-compatible">OpenAI Compatible (custom endpoint)</option>
                 </select>
               </FormField>
 
@@ -529,6 +657,13 @@ export function ContextSettingsModal({
                 </>
               )}
 
+              {formState.CLAUDE_MEM_PROVIDER === 'openai-compatible' && (
+                <OpenAICompatibleSettings
+                  formState={formState}
+                  updateSetting={updateSetting}
+                />
+              )}
+
               <FormField
                 label="Worker Port"
                 tooltip="Port for the background worker service"
@@ -539,6 +674,19 @@ export function ContextSettingsModal({
                   max="65535"
                   value={formState.CLAUDE_MEM_WORKER_PORT || '37777'}
                   onChange={(e) => updateSetting('CLAUDE_MEM_WORKER_PORT', e.target.value)}
+                />
+              </FormField>
+
+              <FormField
+                label="Max Memory (MB)"
+                tooltip="Maximum RAM usage for the worker service (256-8192 MB). Requires worker restart to take effect."
+              >
+                <input
+                  type="number"
+                  min="256"
+                  max="8192"
+                  value={formState.CLAUDE_MEM_MAX_MEMORY_MB || '1024'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_MAX_MEMORY_MB', e.target.value)}
                 />
               </FormField>
 

@@ -17,6 +17,10 @@ export const DEFAULT_SETTINGS = {
   CLAUDE_MEM_OPENROUTER_SITE_URL: '',
   CLAUDE_MEM_OPENROUTER_APP_NAME: 'claude-mem',
   CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED: 'true',
+  // OpenAI Compatible Configuration
+  CLAUDE_MEM_OPENAI_COMPATIBLE_URL: '',
+  CLAUDE_MEM_OPENAI_COMPATIBLE_API_KEY: '',
+  CLAUDE_MEM_OPENAI_COMPATIBLE_MODEL: 'gpt-3.5-turbo',
 
   // Token Economics (all true for backwards compatibility)
   CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS: 'true',

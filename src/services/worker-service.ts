@@ -19,6 +19,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
 import { logger } from '../utils/logger.js';
+import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../shared/paths.js';
 
 // Infrastructure imports
 import {
@@ -59,6 +61,7 @@ import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
 import { SDKAgent } from './worker/SDKAgent.js';
 import { GeminiAgent } from './worker/GeminiAgent.js';
 import { OpenRouterAgent } from './worker/OpenRouterAgent.js';
+import { OpenAICompatibleAgent } from './worker/OpenAICompatibleAgent.js';
 import { PaginationHelper } from './worker/PaginationHelper.js';
 import { SettingsManager } from './worker/SettingsManager.js';
 import { SearchManager } from './worker/SearchManager.js';
@@ -94,6 +97,7 @@ export class WorkerService {
   private sdkAgent: SDKAgent;
   private geminiAgent: GeminiAgent;
   private openRouterAgent: OpenRouterAgent;
+  private openAICompatibleAgent: OpenAICompatibleAgent;
   private paginationHelper: PaginationHelper;
   private settingsManager: SettingsManager;
   private sessionEventBroadcaster: SessionEventBroadcaster;
@@ -120,6 +124,8 @@ export class WorkerService {
     this.geminiAgent.setFallbackAgent(this.sdkAgent);
     this.openRouterAgent = new OpenRouterAgent(this.dbManager, this.sessionManager);
     this.openRouterAgent.setFallbackAgent(this.sdkAgent);
+    this.openAICompatibleAgent = new OpenAICompatibleAgent(this.dbManager, this.sessionManager);
+    this.openAICompatibleAgent.setFallbackAgent(this.sdkAgent);
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);
     this.sessionEventBroadcaster = new SessionEventBroadcaster(this.sseBroadcaster, this);
@@ -173,9 +179,11 @@ export class WorkerService {
   private registerRoutes(): void {
     // Standard routes
     this.server.registerRoutes(new ViewerRoutes(this.sseBroadcaster, this.dbManager, this.sessionManager));
-    this.server.registerRoutes(new SessionRoutes(this.sessionManager, this.dbManager, this.sdkAgent, this.geminiAgent, this.openRouterAgent, this.sessionEventBroadcaster, this));
+    this.server.registerRoutes(new SessionRoutes(this.sessionManager, this.dbManager, this.sdkAgent, this.geminiAgent, this.openRouterAgent, this.openAICompatibleAgent, this.sessionEventBroadcaster, this));
     this.server.registerRoutes(new DataRoutes(this.paginationHelper, this.dbManager, this.sessionManager, this.sseBroadcaster, this, this.startTime));
-    this.server.registerRoutes(new SettingsRoutes(this.settingsManager));
+    const settingsRoutes = new SettingsRoutes(this.settingsManager);
+    settingsRoutes.setOpenAICompatibleAgent(this.openAICompatibleAgent);
+    this.server.registerRoutes(settingsRoutes);
     this.server.registerRoutes(new LogsRoutes());
 
     // Early handler for /api/context/inject to avoid 404 during startup
@@ -558,7 +566,8 @@ async function runInteractiveSetup(): Promise<number> {
     } else {
       console.log('   Starting worker in background...');
 
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnvSetup = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnvSetup);
       if (pid === undefined) {
         console.error('Failed to start worker');
         rl.close();
@@ -618,6 +627,25 @@ Documentation:
 // CLI Entry Point
 // ============================================================================
 
+/**
+ * Get memory limit environment variables from settings
+ * BUN_JSC_maxHeapSize is in bytes, setting is in MB
+ */
+function getMemoryLimitEnv(): Record<string, string> {
+  const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+  const maxMemoryMB = parseInt(settings.CLAUDE_MEM_MAX_MEMORY_MB, 10);
+
+  if (isNaN(maxMemoryMB) || maxMemoryMB <= 0) {
+    return {};
+  }
+
+  // Convert MB to bytes for Bun's JSC heap limit
+  const maxHeapBytes = maxMemoryMB * 1024 * 1024;
+  return {
+    BUN_JSC_maxHeapSize: String(maxHeapBytes)
+  };
+}
+
 async function main() {
   const command = process.argv[2];
   const port = getWorkerPort();
@@ -658,7 +686,8 @@ async function main() {
       }
 
       logger.info('SYSTEM', 'Starting worker daemon');
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnv = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnv);
       if (pid === undefined) {
         logger.error('SYSTEM', 'Failed to spawn worker daemon');
         process.exit(1);
@@ -698,7 +727,8 @@ async function main() {
       }
       removePidFile();
 
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnvRestart = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnvRestart);
       if (pid === undefined) {
         logger.error('SYSTEM', 'Failed to spawn worker daemon during restart');
         process.exit(1);
