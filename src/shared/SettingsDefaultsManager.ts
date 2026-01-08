@@ -55,6 +55,8 @@ export interface SettingsDefaults {
   // Feature Toggles
   CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY: string;
   CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE: string;
+  // Resource Limits
+  CLAUDE_MEM_MAX_MEMORY_MB: string;
 }
 
 export class SettingsDefaultsManager {
@@ -105,6 +107,8 @@ export class SettingsDefaultsManager {
     // Feature Toggles
     CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY: 'true',
     CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE: 'false',
+    // Resource Limits
+    CLAUDE_MEM_MAX_MEMORY_MB: '1024',  // 1GB default max heap size for worker
   };
 
   /**

@@ -19,6 +19,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
 import { logger } from '../utils/logger.js';
+import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../shared/paths.js';
 
 // Infrastructure imports
 import {
@@ -564,7 +566,8 @@ async function runInteractiveSetup(): Promise<number> {
     } else {
       console.log('   Starting worker in background...');
 
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnvSetup = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnvSetup);
       if (pid === undefined) {
         console.error('Failed to start worker');
         rl.close();
@@ -624,6 +627,25 @@ Documentation:
 // CLI Entry Point
 // ============================================================================
 
+/**
+ * Get memory limit environment variables from settings
+ * BUN_JSC_maxHeapSize is in bytes, setting is in MB
+ */
+function getMemoryLimitEnv(): Record<string, string> {
+  const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+  const maxMemoryMB = parseInt(settings.CLAUDE_MEM_MAX_MEMORY_MB, 10);
+
+  if (isNaN(maxMemoryMB) || maxMemoryMB <= 0) {
+    return {};
+  }
+
+  // Convert MB to bytes for Bun's JSC heap limit
+  const maxHeapBytes = maxMemoryMB * 1024 * 1024;
+  return {
+    BUN_JSC_maxHeapSize: String(maxHeapBytes)
+  };
+}
+
 async function main() {
   const command = process.argv[2];
   const port = getWorkerPort();
@@ -664,7 +686,8 @@ async function main() {
       }
 
       logger.info('SYSTEM', 'Starting worker daemon');
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnv = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnv);
       if (pid === undefined) {
         logger.error('SYSTEM', 'Failed to spawn worker daemon');
         process.exit(1);
@@ -704,7 +727,8 @@ async function main() {
       }
       removePidFile();
 
-      const pid = spawnDaemon(__filename, port);
+      const memoryEnvRestart = getMemoryLimitEnv();
+      const pid = spawnDaemon(__filename, port, memoryEnvRestart);
       if (pid === undefined) {
         logger.error('SYSTEM', 'Failed to spawn worker daemon during restart');
         process.exit(1);

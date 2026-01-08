@@ -677,6 +677,19 @@ export function ContextSettingsModal({
                 />
               </FormField>
 
+              <FormField
+                label="Max Memory (MB)"
+                tooltip="Maximum RAM usage for the worker service (256-8192 MB). Requires worker restart to take effect."
+              >
+                <input
+                  type="number"
+                  min="256"
+                  max="8192"
+                  value={formState.CLAUDE_MEM_MAX_MEMORY_MB || '1024'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_MAX_MEMORY_MB', e.target.value)}
+                />
+              </FormField>
+
               <div className="toggle-group" style={{ marginTop: '12px' }}>
                 <ToggleSwitch
                   id="show-last-summary"

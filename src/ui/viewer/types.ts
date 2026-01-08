@@ -92,6 +92,9 @@ export interface Settings {
   // Feature Toggles
   CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY?: string;
   CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE?: string;
+
+  // Resource Limits
+  CLAUDE_MEM_MAX_MEMORY_MB?: string;
 }
 
 export interface WorkerStats {

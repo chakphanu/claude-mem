@@ -140,6 +140,8 @@ export class SettingsRoutes extends BaseRouteHandler {
       // Feature Toggles
       'CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY',
       'CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE',
+      // Resource Limits
+      'CLAUDE_MEM_MAX_MEMORY_MB',
     ];
 
     for (const key of settingKeys) {
@@ -405,6 +407,14 @@ export class SettingsRoutes extends BaseRouteHandler {
 
     // Skip observation concepts validation - any concept string is valid since modes define their own concepts
     // The database accepts any TEXT value, and mode-specific validation happens at parse time
+
+    // Validate CLAUDE_MEM_MAX_MEMORY_MB (256-8192 MB)
+    if (settings.CLAUDE_MEM_MAX_MEMORY_MB) {
+      const memoryMB = parseInt(settings.CLAUDE_MEM_MAX_MEMORY_MB, 10);
+      if (isNaN(memoryMB) || memoryMB < 256 || memoryMB > 8192) {
+        return { valid: false, error: 'CLAUDE_MEM_MAX_MEMORY_MB must be between 256 and 8192' };
+      }
+    }
 
     return { valid: true };
   }
